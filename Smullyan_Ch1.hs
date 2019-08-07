@@ -20,6 +20,30 @@ data SignedWff t = Swff {
   }
   deriving (Eq, Show)
 
+--examples
+p = Sym 'p'
+q = Sym 'q'
+r = Sym 'r'
+
+w1 = p 
+w2 = Conj p (Neg p)
+w3 = Conj p q
+w4 = Disj (Neg p) (Neg q)
+
+sw1 = Swff True w1
+sw2 = Swff True w2
+sw3 = Swff False w3
+sw4 = Swff True w4
+sw5 = Swff False (Impl (Neg w4) (w3))
+
+mySw = Swff False
+  (Impl
+   (Impl p 
+    (Impl q r))
+   (Impl (Impl p q)
+    (Impl p r))
+  )
+
 --'we begin by noting that under any interpretation
 --the following eight facts hold (for any formulas
 --X, Y): '
@@ -52,31 +76,6 @@ type Box t = Either [t] (t, t)
  --Left,       on a [t], or
  --Right,      on a (t,t)
 
---examples
-p = Sym 'p'
-q = Sym 'q'
-r = Sym 'r'
-
-w1 = p 
-w2 = Conj p (Neg p)
-w3 = Conj p q
-w4 = Disj (Neg p) (Neg q)
-
-sw1 = Swff True w1
-sw2 = Swff True w2
-sw3 = Swff False w3
-sw4 = Swff True w4
-sw5 = Swff False (Impl (Neg w4) (w3))
-
---importing Data.Tree instead so I can use 'drawTree'
--- --now work on tree data-type stuff
--- data Tree a = Node
---  { rootLabel :: a,
---    subForest :: (Forest a)}
---   deriving (Eq, Show)
-
--- type Forest a = [Tree a]
-
 --we will need a function for fleshing out a subforest,
 --based upon contents of the immediately preceding 'rootLabel'
 --of the node
@@ -91,7 +90,7 @@ stick_node x n@(Node {rootLabel = rl}) =
 stick_leaves :: Monoid a => a -> Tree a -> Tree a
 stick_leaves x n@(Node {subForest = sf}) =
  case sf of
-  []               ->  n{subForest = sf ++ [Node x []]}
+  []               ->  n{subForest = sf ++ [Node x []]}   --use (<>), not (++)
   otherwise        ->  n{subForest = map (stick_node x) sf}
      
 
@@ -149,9 +148,7 @@ swffs_tree =
    Node [Swff True $ Sym 'd', Swff False $ Sym 'f'] []]
 
 
---right now the below code *almost* works, except
---that when leaves of the tree (subforest) is empty,
---this doesn't have the desired effect
+
 reduce :: SignedWff t -> Box (SignedWff t)
 reduce s@(Swff b w) =
  case (b, w) of 
@@ -279,3 +276,24 @@ expand t@(Node rl sf)
 
 --auxiliary function for use with drawTree
 --need to turn every node into a 'String' ?
+
+--'drawTree' has type :: Tree String -> String,
+--so first, need to be able to turn Tree [SignedWff t]
+--into Tree String  
+mapTree :: (a -> b) -> Tree a -> Tree b 
+mapTree f (Node rl sf) = Node (f rl) (map (mapTree f) sf)
+
+stringifyTree :: (Show t) => Tree t -> Tree String
+stringifyTree = mapTree show
+
+--start from a SignedWff t; show its resulting,
+--fully expanded tree via tableau method, using
+--'drawTree'
+--It does but I wanted, but the tree printing
+--doesn't work well with record syntax ...
+drawTableau :: (Show t) => SignedWff t -> String
+drawTableau swff = 
+  let 
+    t_0 = Node [swff] []
+  in
+    drawTree $ stringifyTree $ expand t_0
