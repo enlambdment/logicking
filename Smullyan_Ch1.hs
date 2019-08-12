@@ -44,24 +44,6 @@ mySw = Swff False
     (Impl p r))
   )
 
---'we begin by noting that under any interpretation
---the following eight facts hold (for any formulas
---X, Y): '
-
---given a term :: SignedWff t,
---either return its simplification if there is one,
---or else if none available, Nothing
--- reduce :: SignedWff t -> Maybe (Wff (SignedWff t))
--- reduce (Swff b w) =
---  case (b, w) of
---   (_, Sym x)          -> Nothing
---   (_, Neg w)          -> Just $ Sym  (Swff (not b) w)
---   (True, Conj x y)    -> Just $ Conj (Sym (Swff True x))   (Sym (Swff True y))
---   (False, Disj x y)   -> Just $ Conj (Sym (Swff False x))  (Sym (Swff False y))
---   (False, Impl x y)   -> Just $ Conj (Sym (Swff True x))   (Sym (Swff False y))
---   (True, Disj x y)    -> Just $ Disj (Sym (Swff True x))   (Sym (Swff True y))
---   (False, Conj x y)   -> Just $ Disj (Sym (Swff False x))  (Sym (Swff False y))
---   (True, Impl x y)    -> Just $ Disj (Sym (Swff False x))  (Sym (Swff True y))
 
 --this feels sort of ad hoc but I can't think
 --of a better way
@@ -83,14 +65,14 @@ type Box t = Either [t] (t, t)
 --trying out some argument capture w/ record syntax
 stick_node :: Monoid a => a -> Tree a -> Tree a
 stick_node x n@(Node {rootLabel = rl}) =
- n{rootLabel = rl `mappend` x}
+ n{rootLabel = x `mappend` rl}
 
 --the behavior here has to depend on whether
 --(subForest n) = [] or is non-empty
 stick_leaves :: Monoid a => a -> Tree a -> Tree a
 stick_leaves x n@(Node {subForest = sf}) =
  case sf of
-  []               ->  n{subForest = sf ++ [Node x []]}   --use (<>), not (++)
+  []               ->  n{subForest = sf ++ [Node x []]}   
   otherwise        ->  n{subForest = map (stick_node x) sf}
      
 
@@ -148,9 +130,10 @@ swffs_tree =
    Node [Swff True $ Sym 'd', Swff False $ Sym 'f'] []]
 
 
-
-reduce :: SignedWff t -> Box (SignedWff t)
-reduce s@(Swff b w) =
+--renaming 'reduce' to 'elim' per the standard terminology
+--re: elimination rules
+elim :: SignedWff t -> Box (SignedWff t)
+elim s@(Swff b w) =
  case (b, w) of 
   (_, Sym x)          -> Left  [s]
   (_, Neg v)          -> Left  [Swff (not b) v]
@@ -164,14 +147,13 @@ reduce s@(Swff b w) =
   (True, Impl u v)    -> Right (Swff False u, Swff True v)
   (False, Impl u v)   -> Left  [Swff True u,  Swff False v]
 
---suppose you already know the shape of some reduced
---swff s, via 'reduce s :: Box Swff', and you want to
+--suppose you already know the shape of some elim'd
+--swff s, via 'elim s :: Box Swff', and you want to
 --do the appropriate thing to the tree you're working on
 step ::  Box q -> Tree [q] -> Tree [q]
 step b n@(Node rl sf) =
  case (b, sf) of
   (Left ws, _)            -> stick_leaves ws n 
-  --debug this case.
   (Right (v, w), _)       --I can't think of a neater solution
    | null sf         ->  n{subForest = sf ++ [Node [v] []] ++ [Node [w] []]}
    | otherwise       ->  n{subForest = concat [map (stick_node [v]) sf,
@@ -181,9 +163,9 @@ step b n@(Node rl sf) =
 -- for an analytic tableau
 next_level :: Tree [SignedWff t] -> Tree [SignedWff t]
 next_level n@(Node rl sf) = 
- foldr step n (map reduce rl)
+ foldr step n (map elim rl)
 
---doesn't work for t1, t2
+
 t1 :: Tree [SignedWff Char]
 t1 = 
  Node [Swff True p] []
@@ -191,7 +173,6 @@ t1 =
 t2 =
  Node [Swff True (Conj p q)] []
 
---does work for t3
 t3 =
  Node [Swff True (Conj p q)]
   [Node [Swff True  r] 
@@ -200,7 +181,6 @@ t3 =
         []
         ] 
     
---compare / contrast behavior in these cases
 t4 =
  Node [Swff True (Conj p q),
        Swff True r]       
@@ -213,7 +193,6 @@ t4' =
 
 t5 = 
  Node [Swff True (Disj p q)] []
---should get: length $ subForest $ next_level t5 = 2
 
 t6 =
  Node [Swff True (Disj p q), Swff True r, Swff False q] []
@@ -226,7 +205,8 @@ t7 =
 
 --                  isTauto                    
 --the main process can now be described as follows:
---starting with some          f :: SignedWff t,
+--starting with some          s  :: Wff t,
+--and using the signed wff      s' := Swff False s :: Swff t, 
 --build the tree              t = Node [f] []
 --and determine whether, at root-label level,
 --[f] consists of nothing but symbols :: Sym t
@@ -249,13 +229,24 @@ isSignSymList (z@(Swff b w):zs)  =
   Sym _      -> isSignSymList zs
   _          -> False
 
+--only to be used for applying `any` over a list of SignedWff's
+contradicts :: (Eq t) => SignedWff t -> SignedWff t -> Bool
+contradicts (Swff b s@(Sym p)) (Swff b' s'@(Sym p')) = 
+ s == s' && b == not b'
 
---STOP FOR NOW (8/4/2019)
--- --need to check if a list of signed sym's 
--- --contains any contradictions
--- hasContra :: [SignedWff t] -> Bool
--- hasContra []      = False
--- hasContra (w:ws)  =
+--only to be used for filtering on a list of SignedWff's
+same_sym :: (Eq t) => SignedWff t -> SignedWff t -> Bool
+same_sym (Swff b s@(Sym p)) (Swff b' s'@(Sym p')) =
+ s == s'
+
+
+has_contra :: (Eq t) => [SignedWff t] -> Bool
+has_contra []         = False
+has_contra (w:ws)     =
+ any (contradicts w) ws || 
+  let l' = filter (not . same_sym w) ws
+  in
+   has_contra l'
 
 
 
@@ -265,6 +256,15 @@ isSignSymList (z@(Swff b w):zs)  =
 --all satisfying 
 --   isSignSymList $ rootLabel n == True
 
+--helper function to get all the leaf-level nodes of a tree
+leaves :: Tree t -> [t]
+leaves t@(Node rl sf)
+ | null sf                   = [rl]
+ | otherwise                 = 
+     let ls = map leaves sf
+     in
+      concat ls
+
 --when calling this function it's assumed that sf is null
 expand :: Tree [SignedWff t] -> Tree [SignedWff t]
 expand t@(Node rl sf)
@@ -273,6 +273,43 @@ expand t@(Node rl sf)
      let t' = next_level t
      in
       t'{subForest = map expand (subForest t') }
+
+
+isTauto :: (Eq t) => Wff t -> Bool
+isTauto w =
+   let false_w   = Swff False w
+       tableau_w = expand $ Node [false_w] []
+       leaves_w  = leaves tableau_w
+   in
+       all has_contra leaves_w     --given some well-formed formula of prop' logic: w,
+                                   --w is a tautology (isTauto w == True) iff
+                                   --its fully expanded tableau's final leaf-level
+                                   --lists of SignedWff's each contain some contradiction
+                                   --(these will each be lists of signed symbols)
+
+
+--these wff's should give `isTauto w = False`
+wff1 = p
+wff2 = q
+wff3 = r
+
+wff4 = Conj p q
+wff5 = Disj p r
+wff6 = Impl p q
+
+--these wff's should give `isTauto w = True`
+wff7 = Disj p (Neg p)
+wff8 = Impl p (Disj p q)
+wff9 = 
+ Impl
+  (Impl p (Impl q r))
+  (Impl (Impl p q) (Impl p r)) 
+
+
+
+
+
+
 
 --auxiliary function for use with drawTree
 --need to turn every node into a 'String' ?
